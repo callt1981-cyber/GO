@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Eyewear Inventory</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root { --bg:#f7f7fb; --card:#fff; --border:#e2e2ea; --text:#222; --muted:#777; --accent:#3b5bfd; --danger:#d9534f; --danger-bg:#fdecea; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:var(--bg); color:var(--text); margin:0; padding:20px; }
+  h1 { font-size:1.4rem; margin-bottom:4px; }
+  .sub { color:var(--muted); margin-top:0; margin-bottom:20px; font-size:0.9rem; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:18px; margin-bottom:20px; }
+  form { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:12px; }
+  label { display:block; font-size:0.78rem; color:var(--muted); margin-bottom:4px; }
+  input, select { width:100%; padding:8px; border:1px solid var(--border); border-radius:6px; font-size:0.9rem; text-transform:uppercase; }
+  input#loginPhone, input#loginPassword { text-transform:none; }
+  table { text-transform:uppercase; width:100%; border-collapse:collapse; font-size:0.85rem; }
+  .full { grid-column: 1 / -1; }
+  button { background:var(--accent); color:#fff; border:none; padding:10px 18px; border-radius:6px; font-size:0.9rem; cursor:pointer; margin-top:6px; }
+  button.secondary { background:#eee; color:#333; }
+  button:disabled { opacity:0.6; cursor:not-allowed; }
+  .warning { background:var(--danger-bg); border:1px solid #f5c2c0; color:var(--danger); padding:12px; border-radius:8px; margin-top:14px; display:none; }
+  .warning.show { display:block; }
+  .warning button { margin-right:8px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); white-space:nowrap; }
+  th { color:var(--muted); font-weight:600; font-size:0.75rem; text-transform:uppercase; }
+  .table-wrap { overflow-x:auto; }
+  .status { font-size:0.85rem; color:var(--muted); margin-top:8px; }
+  .search { margin-bottom:12px; }
+  .config-note { font-size:0.8rem; color:var(--danger); }
+  .topbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px; }
+  .topbar .who { font-size:0.85rem; color:var(--muted); }
+  .badge { display:inline-block; background:#eef1ff; color:var(--accent); padding:2px 8px; border-radius:20px; font-size:0.7rem; font-weight:600; text-transform:uppercase; margin-left:6px; }
+  .toolbar { display:flex; gap:8px; flex-wrap:wrap; }
+  .toolbar button { margin-top:0; }
+  #loginScreen { max-width:360px; margin:60px auto; }
+  #loginScreen input { margin-bottom:10px; text-transform:none; }
+  #loginError { color:var(--danger); font-size:0.85rem; margin-top:8px; display:none; }
+  #appWrapper { display:none; }
+  #qrPrintArea { display:none; }
+  .qr-label { display:inline-flex; flex-direction:row; align-items:center; justify-content:center; width:2in; height:1in; margin:4px; padding:6px; border:1px dashed #999; box-sizing:border-box; page-break-inside:avoid; text-transform:uppercase; overflow:hidden; vertical-align:top; }
+  .qr-label .qr-img { width:0.75in; height:0.75in; flex-shrink:0; }
+  .qr-label .qr-text { display:flex; flex-direction:column; justify-content:center; align-items:center; margin-left:8px; text-align:center; overflow:hidden; min-width:0; }
+  .qr-label .qr-digits { font-weight:700; font-size:10px; letter-spacing:0.5px; white-space:nowrap; }
+  .qr-label .qr-desc { font-size:8px; margin-top:2px; line-height:1.2; text-align:center; }
+  .qr-label .qr-price { font-size:10px; font-weight:700; margin-top:2px; }
+  .qr-label .barcode-img { width:1.05in; height:0.18in; margin-top:3px; object-fit:fill; display:block; }
+  .summary-row { display:flex; justify-content:space-between; max-width:280px; text-transform:uppercase; }
+  @page {
+    size: landscape;
+    margin: 10mm;
+  }
+  @media print {
+    #loginScreen, .topbar, .card form, #liveMatches, .warning, .status, .search, .no-print { display:none !important; }
+    body { padding:0; }
+    .card { border:none; padding:0; }
+    .table-wrap { overflow:visible !important; }
+    table { font-size:9px; width:100%; table-layout:auto; }
+    th, td { padding:4px 5px; white-space:normal; word-break:break-word; }
+    tr.print-excluded { display:none !important; }
+
+    body.printing-qr .card,
+    body.printing-qr .topbar,
+    body.printing-qr #loginScreen { display:none !important; }
+    body.printing-qr #qrPrintArea { display:block !important; }
+    body:not(.printing-qr) #qrPrintArea { display:none !important; }
+
+    body.printing-qr .qr-label {
+      width:2in;
+      height:1in;
+      margin:0;
+      padding:0.06in;
+      border:none;
+      box-sizing:border-box;
+      page-break-after:always;
+      break-after:page;
+    }
+  }
+</style>
+<style id="qrPageOverride"></style>
+</head>
+<body>
+
+<div id="loginScreen" class="card">
+  <h1>Eyewear Inventory</h1>
+  <p class="sub">Sign in to continue</p>
+  <input id="loginPhone" type="tel" placeholder="MOBILE NUMBER">
+  <input id="loginPassword" type="password" placeholder="PASSWORD">
+  <button id="loginBtn" style="width:100%;">Log In</button>
+  <div id="loginError"></div>
+</div>
+
+<div id="appWrapper">
+
+  <div class="topbar">
+    <div>
+      <h1 style="margin-bottom:0;">Eyewear Inventory</h1>
+      <p class="sub" style="margin-bottom:0;">Add items below — the system checks for duplicates automatically before saving.</p>
+    </div>
+    <div style="text-align:right;">
+      <div class="who">
+        <span id="whoEmail"></span><span class="badge" id="whoRole"></span>
+      </div>
+      <div class="toolbar" style="margin-top:6px;">
+        <button type="button" id="printBtn" class="secondary">🖨️ Print / PDF</button>
+        <button type="button" id="qrPrintBtn" class="secondary">🔲 Print QR Labels</button>
+        <button type="button" id="exportBtn" class="secondary">⬇️ Export Excel (CSV)</button>
+        <button type="button" id="logoutBtn" class="secondary">Log Out</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card no-print" id="formCard">
+    <form id="itemForm">
+      <div><label>Type</label>
+        <select id="itemType" required><option value="" disabled selected>SELECT</option><option value="FRAME">FRAME</option><option value="SUNGLASS">SUNGLASS</option></select>
+      </div>
+      <div><label>Brand</label><input id="brand" list="dl-brand" required></div>
+      <div><label>Model</label><input id="model" list="dl-model" required></div>
+      <div><label>Size</label><input id="size" list="dl-size" required></div>
+      <div><label>RIM Colour</label><input id="rimColour" list="dl-rimColour" required></div>
+      <div><label>Side Colour</label><input id="sideColour" list="dl-sideColour" required></div>
+      <div><label>Gender</label>
+        <select id="gender" required><option value="" disabled selected>SELECT</option><option>UNI</option><option>MEN</option><option>WOMEN</option><option>KIDS</option></select>
+      </div>
+      <div><label>Material</label><input id="material" list="dl-material" required></div>
+      <div><label>Rim Type</label>
+        <select id="rimType" required><option value="" disabled selected>SELECT</option><option>FULL</option><option>RIMLESS</option><option>HALF</option></select>
+      </div>
+      <div><label>Shape</label><input id="shape" list="dl-shape" required></div>
+      <div><label>Quantity</label><input id="quantity" type="number" min="1" value="1" required></div>
+      <div><label>Box</label><input id="box" list="dl-box" value="BOX1"></div>
+      <div><label>Price</label><input id="price"></div>
+
+      <datalist id="dl-brand"></datalist>
+      <datalist id="dl-model"></datalist>
+      <datalist id="dl-size"></datalist>
+      <datalist id="dl-rimColour"></datalist>
+      <datalist id="dl-sideColour"></datalist>
+      <datalist id="dl-material"></datalist>
+      <datalist id="dl-shape"></datalist>
+      <datalist id="dl-box"></datalist>
+      <div class="full">
+        <button type="submit" id="submitBtn">Check &amp; Add Item</button>
+        <button type="button" id="cancelEditBtn" class="secondary" style="display:none;">Cancel Edit</button>
+      </div>
+    </form>
+
+    <div id="liveMatches" class="full" style="margin-top:14px; display:none;">
+      <div style="font-size:0.8rem; color:var(--muted); margin-bottom:6px;">POSSIBLE MATCHES IN SYSTEM (BASED ON WHAT YOU'VE TYPED):</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Type</th><th>Sr#</th><th>Brand</th><th>Model</th><th>Size</th><th>RIM</th><th>Side</th><th>Gender</th>
+            <th>Material</th><th>Rim Type</th><th>Shape</th><th>Qty</th><th>Box</th><th>Price</th>
+          </tr></thead>
+          <tbody id="liveMatchesBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="warningBox" class="warning">
+      <div id="warningText"></div>
+      <div style="margin-top:10px;">
+        <button id="updateQtyBtn" type="button">Add qty to existing item instead</button>
+        <button id="forceAddBtn" type="button" class="secondary">Add as new item anyway</button>
+        <button id="cancelBtn" type="button" class="secondary">Cancel</button>
+      </div>
+    </div>
+
+    <div id="statusMsg" class="status"></div>
+  </div>
+
+  <div class="card">
+    <div id="boxSummaryToggle" style="font-weight:700; text-transform:uppercase; cursor:pointer; display:flex; justify-content:space-between; align-items:center;">
+      <span>Box Summary</span>
+      <span id="boxSummaryArrow" style="font-size:0.8rem;">▼</span>
+    </div>
+    <div id="boxSummaryContent" style="display:none; margin-top:10px;">
+      <div id="boxSummaryBody" style="font-size:0.9rem; line-height:1.9;"></div>
+      <div style="border-top:1px solid var(--border); margin-top:10px; padding-top:10px; max-width:280px;">
+        <div class="summary-row" style="font-weight:700;"><span>BOX TOTAL</span><span id="boxCountTotal">0</span></div>
+        <div class="summary-row" style="font-weight:700;"><span>PCS TOTAL</span><span id="pcsCountTotal">0</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card no-print" id="salesCard">
+    <div id="salesToggle" style="font-weight:700; text-transform:uppercase; cursor:pointer; display:flex; justify-content:space-between; align-items:center;">
+      <span>Record Sale</span>
+      <span id="salesArrow" style="font-size:0.8rem;">▼</span>
+    </div>
+    <div id="salesContent" style="display:none; margin-top:14px;">
+      <form id="saleForm" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:12px;">
+        <div><label>Item Barcode</label><input id="saleBarcode" list="dl-itemcode" required></div>
+        <div><label>Date</label><input id="saleDate" type="date" required></div>
+        <div><label>Job No.</label><input id="saleJobNo" required></div>
+        <div><label>Qty</label><input id="saleQty" type="number" min="1" value="1" required></div>
+        <datalist id="dl-itemcode"></datalist>
+        <div class="full">
+          <button type="submit" id="saleSubmitBtn">Record Sale</button>
+        </div>
+      </form>
+      <div id="saleItemInfo" style="font-size:0.85rem; color:var(--muted); margin-top:8px;"></div>
+      <div id="saleStatusMsg" class="status"></div>
+
+      <div style="margin-top:16px;">
+        <div style="font-weight:700; margin-bottom:8px; text-transform:uppercase; font-size:0.85rem;">Recent Sales</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Date</th><th>Barcode</th><th>Brand</th><th>Model</th><th>Job No.</th><th>Qty Sold</th>
+            </tr></thead>
+            <tbody id="salesLogBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <input class="search no-print" id="searchBox" placeholder="Search items...">
+    <div class="table-wrap">
+      <table id="itemsTable">
+        <thead>
+          <tr>
+            <th class="no-print"><input type="checkbox" id="selectAllCheckbox"></th>
+            <th>Type</th><th>Sr#</th><th>Brand</th><th>Model</th><th>Size</th><th>RIM</th><th>Side</th><th>Gender</th>
+            <th>Material</th><th>Rim Type</th><th>Shape</th><th>Qty</th><th>Box</th><th>Other Box</th><th>Price</th><th>Barcode</th><th class="no-print">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="itemsBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<div id="qrPrintArea"></div>
+
+<script>
+  // ====== FILL THESE IN FROM YOUR SUPABASE PROJECT (Settings > API) ======
+  const SUPABASE_URL = "https://kbcyqlmhniyogzjzukyf.supabase.co";
+  const SUPABASE_ANON_KEY = "sb_publishable_K2JxfD93J3431fhJs71fAQ_NsgxQr1L";
+  // =========================================================================
+
+  let sb;
+  let configured = SUPABASE_URL.startsWith("http") && SUPABASE_ANON_KEY.length > 10;
+  if (configured) {
+    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  }
+
+  let currentRole = null; // 'admin' | 'edit' | 'view'
+  let allItems = [];
+  let editingId = null;
+  let pendingItem = null;
+  let pendingDupRow = null;
+  const selectedIds = new Set();
+
+  function updatePrintFilterClasses() {
+    document.querySelectorAll('#itemsBody tr').forEach(tr => {
+      const id = tr.dataset.id;
+      if (selectedIds.size > 0 && !selectedIds.has(id)) {
+        tr.classList.add('print-excluded');
+      } else {
+        tr.classList.remove('print-excluded');
+      }
+    });
+  }
+
+  document.getElementById('selectAllCheckbox').addEventListener('change', (e) => {
+    document.querySelectorAll('#itemsBody tr').forEach(tr => {
+      const cb = tr.querySelector('.row-select');
+      cb.checked = e.target.checked;
+      if (e.target.checked) selectedIds.add(tr.dataset.id); else selectedIds.delete(tr.dataset.id);
+    });
+    updatePrintFilterClasses();
+  });
+
+  const loginScreen = document.getElementById('loginScreen');
+  const appWrapper = document.getElementById('appWrapper');
+  const loginError = document.getElementById('loginError');
+  const form = document.getElementById('itemForm');
+  const warningBox = document.getElementById('warningBox');
+  const warningText = document.getElementById('warningText');
+  const statusMsg = document.getElementById('statusMsg');
+  const updateQtyBtn = document.getElementById('updateQtyBtn');
+  const forceAddBtn = document.getElementById('forceAddBtn');
+  const cancelBtn = document.getElementById('cancelBtn');
+  const submitBtn = document.getElementById('submitBtn');
+  const cancelEditBtn = document.getElementById('cancelEditBtn');
+  const formCard = document.getElementById('formCard');
+
+  // ---------- AUTH ----------
+  document.getElementById('loginBtn').addEventListener('click', async () => {
+    loginError.style.display = 'none';
+    const phoneRaw = document.getElementById('loginPhone').value.trim();
+    const phone = phoneRaw.replace(/\D/g, ''); // digits only
+    const password = document.getElementById('loginPassword').value;
+    if (!configured) { loginError.textContent = "Supabase isn't configured yet."; loginError.style.display='block'; return; }
+    if (!phone) { loginError.textContent = "Enter a mobile number."; loginError.style.display='block'; return; }
+    const syntheticEmail = phone + "@inventory.local";
+    const { data, error } = await sb.auth.signInWithPassword({ email: syntheticEmail, password });
+    if (error) { loginError.textContent = error.message; loginError.style.display = 'block'; return; }
+    await afterLogin(data.user);
+  });
+
+  document.getElementById('logoutBtn').addEventListener('click', async () => {
+    await sb.auth.signOut();
+    location.reload();
+  });
+
+  async function afterLogin(user) {
+    const { data: profile, error } = await sb.from('profiles').select('role, phone').eq('id', user.id).single();
+    if (error || !profile) {
+      loginError.textContent = "Logged in, but no role is set up for this account. Ask your admin to add you to the profiles table.";
+      loginError.style.display = 'block';
+      await sb.auth.signOut();
+      return;
+    }
+    currentRole = profile.role; // 'admin' | 'edit' | 'view'
+    document.getElementById('whoEmail').textContent = profile.phone || user.email.replace('@inventory.local', '');
+    document.getElementById('whoRole').textContent = currentRole;
+    applyRolePermissions();
+    loginScreen.style.display = 'none';
+    appWrapper.style.display = 'block';
+    loadItems();
+  }
+
+  function applyRolePermissions() {
+    if (currentRole === 'view') {
+      formCard.style.display = 'none';
+      document.getElementById('salesCard').style.display = 'none';
+    } else {
+      formCard.style.display = 'block';
+      document.getElementById('salesCard').style.display = 'block';
+    }
+  }
+
+  async function checkExistingSession() {
+    if (!configured) {
+      statusMsg.innerHTML = '<span class="config-note">Set SUPABASE_URL and SUPABASE_ANON_KEY in the code before this will work.</span>';
+      return;
+    }
+    const { data } = await sb.auth.getSession();
+    if (data.session && data.session.user) {
+      await afterLogin(data.session.user);
+    }
+  }
+  checkExistingSession();
+
+  // ---------- HELPERS ----------
+  function up(v) { return v.trim().toUpperCase(); }
+
+  function fields() {
+    return {
+      brand: up(document.getElementById('brand').value),
+      item_type: up(document.getElementById('itemType').value),
+      model: up(document.getElementById('model').value),
+      size: up(document.getElementById('size').value),
+      rim_colour: up(document.getElementById('rimColour').value),
+      side_colour: up(document.getElementById('sideColour').value),
+      gender: up(document.getElementById('gender').value),
+      material: up(document.getElementById('material').value),
+      rim_type: up(document.getElementById('rimType').value),
+      shape: up(document.getElementById('shape').value),
+      quantity: parseInt(document.getElementById('quantity').value || "1"),
+      box: up(document.getElementById('box').value),
+      price: document.getElementById('price').value.trim(),
+    };
+  }
+
+  function buildDescription(f) {
+    return [f.brand, f.item_type, f.model, f.size, f.rim_colour, f.side_colour, f.gender, f.material, f.rim_type, f.shape]
+      .join('|').toLowerCase().replace(/\s+/g, '');
+  }
+
+  function resetWarning() {
+    warningBox.classList.remove('show');
+    pendingItem = null;
+    pendingDupRow = null;
+  }
+
+  function populateDatalist(id, values) {
+    const dl = document.getElementById(id);
+    dl.innerHTML = '';
+    [...new Set(values.filter(Boolean))].sort().forEach(v => {
+      const opt = document.createElement('option');
+      opt.value = v;
+      dl.appendChild(opt);
+    });
+  }
+
+  function refreshDatalists(data) {
+    populateDatalist('dl-brand', data.map(r => r.brand));
+    populateDatalist('dl-model', data.map(r => r.model));
+    populateDatalist('dl-size', data.map(r => r.size));
+    populateDatalist('dl-rimColour', data.map(r => r.rim_colour));
+    populateDatalist('dl-sideColour', data.map(r => r.side_colour));
+    populateDatalist('dl-material', data.map(r => r.material));
+    populateDatalist('dl-shape', data.map(r => r.shape));
+    populateDatalist('dl-box', data.map(r => r.box));
+    populateDatalist('dl-itemcode', data.map(r => r.item_code));
+  }
+
+  // ---------- LOAD / RENDER ----------
+  async function loadItems() {
+    if (!configured || !currentRole) return;
+    const { data, error } = await sb.from('items').select('*').order('created_at', { ascending: true });
+    if (error) { statusMsg.textContent = 'Error loading items: ' + error.message; return; }
+    allItems = data;
+    refreshDatalists(data);
+    renderItemsTable(document.getElementById('searchBox').value);
+  }
+
+  function renderItemsTable(filter) {
+    const data = allItems;
+    const body = document.getElementById('itemsBody');
+    body.innerHTML = '';
+
+    let rows = data;
+    if (filter) {
+      rows = data.filter(r => JSON.stringify(r).toLowerCase().includes(filter.toLowerCase()));
+    }
+    // Show newest first, but keep serial numbers based on original ascending creation order
+    const withSerial = data.map((r, i) => ({ ...r, sno: i + 1 }));
+    const serialMap = {};
+    withSerial.forEach(r => serialMap[r.id] = r.sno);
+    const displayRows = [...rows].reverse();
+
+    displayRows.forEach(r => {
+      const tr = document.createElement('tr');
+      tr.dataset.id = r.id;
+      const canDelete = currentRole === 'admin';
+      const canEdit = currentRole === 'admin' || currentRole === 'edit';
+      let actionsHtml = '';
+      if (canEdit) actionsHtml += `<button type="button" class="secondary edit-btn" style="padding:5px 10px; margin:0 4px 0 0; font-size:0.78rem;">Edit</button>`;
+      if (canDelete) actionsHtml += `<button type="button" class="secondary delete-btn" style="padding:5px 10px; margin:0; font-size:0.78rem; color:#c0392b;">Delete</button>`;
+      const checked = selectedIds.has(String(r.id)) ? 'checked' : '';
+      const boxDisplay = formatBoxBreakdown(getBoxBreakdown(r));
+      const otherBoxes = allItems
+        .filter(x => x.description === r.description && x.id !== r.id)
+        .map(x => `${x.box} (SR#${serialMap[x.id]})`)
+        .join(', ');
+      tr.innerHTML = `<td class="no-print"><input type="checkbox" class="row-select" ${checked}></td>
+        <td>${r.item_type || ''}</td><td>${serialMap[r.id]}</td><td>${r.brand}</td><td>${r.model}</td><td>${r.size}</td><td>${r.rim_colour}</td>
+        <td>${r.side_colour}</td><td>${r.gender}</td><td>${r.material}</td><td>${r.rim_type}</td>
+        <td>${r.shape}</td><td>${r.quantity}</td><td>${boxDisplay}</td><td>${otherBoxes}</td><td>${r.price || ''}</td><td>${r.item_code || ''}</td>
+        <td class="no-print" style="white-space:nowrap;">${actionsHtml || '-'}</td>`;
+      if (canEdit) tr.querySelector('.edit-btn').addEventListener('click', () => startEdit(r));
+      if (canDelete) tr.querySelector('.delete-btn').addEventListener('click', () => deleteItem(r));
+      tr.querySelector('.row-select').addEventListener('change', (e) => {
+        if (e.target.checked) selectedIds.add(String(r.id)); else selectedIds.delete(String(r.id));
+        updatePrintFilterClasses();
+      });
+      body.appendChild(tr);
+    });
+    updatePrintFilterClasses();
+    renderBoxSummary();
+  }
+
+  function renderBoxSummary() {
+    const totals = {};
+    allItems.forEach(r => {
+      const breakdown = getBoxBreakdown(r);
+      Object.entries(breakdown).forEach(([key, qty]) => {
+        totals[key] = (totals[key] || 0) + (parseInt(qty) || 0);
+      });
+    });
+    const boxKeys = Object.keys(totals).sort((a, b) => {
+      const na = parseInt((a.match(/\d+/) || [0])[0]);
+      const nb = parseInt((b.match(/\d+/) || [0])[0]);
+      return na - nb;
+    });
+    const container = document.getElementById('boxSummaryBody');
+    container.innerHTML = '';
+    let pcsTotal = 0;
+    boxKeys.forEach(key => {
+      const qty = totals[key];
+      pcsTotal += qty;
+      const digitMatch = key.match(/(\d+)$/);
+      const label = digitMatch ? key.slice(0, digitMatch.index).trim() + ' NO.' + digitMatch[1] : key;
+      const row = document.createElement('div');
+      row.className = 'summary-row';
+      row.innerHTML = `<span>${label}</span><span>${qty} PCS</span>`;
+      container.appendChild(row);
+    });
+    document.getElementById('boxCountTotal').textContent = boxKeys.length;
+    document.getElementById('pcsCountTotal').textContent = pcsTotal;
+  }
+
+  document.getElementById('searchBox').addEventListener('input', (e) => renderItemsTable(e.target.value));
+
+  document.getElementById('boxSummaryToggle').addEventListener('click', () => {
+    const content = document.getElementById('boxSummaryContent');
+    const arrow = document.getElementById('boxSummaryArrow');
+    const isHidden = content.style.display === 'none';
+    content.style.display = isHidden ? 'block' : 'none';
+    arrow.textContent = isHidden ? '▲' : '▼';
+  });
+
+  // ---------- SALES MODULE ----------
+  const saleDateInput = document.getElementById('saleDate');
+  if (saleDateInput) saleDateInput.value = new Date().toISOString().slice(0, 10);
+
+  document.getElementById('salesToggle').addEventListener('click', () => {
+    const content = document.getElementById('salesContent');
+    const arrow = document.getElementById('salesArrow');
+    const isHidden = content.style.display === 'none';
+    content.style.display = isHidden ? 'block' : 'none';
+    arrow.textContent = isHidden ? '▲' : '▼';
+    if (isHidden) loadSalesLog();
+  });
+
+  document.getElementById('saleBarcode').addEventListener('input', () => {
+    const code = up(document.getElementById('saleBarcode').value);
+    const info = document.getElementById('saleItemInfo');
+    if (!code) { info.textContent = ''; return; }
+    const item = allItems.find(x => x.item_code === code);
+    if (!item) { info.textContent = 'No item found with this barcode.'; return; }
+    info.textContent = `${item.brand} ${item.model} ${item.rim_colour} — AVAILABLE QTY: ${item.quantity}`;
+  });
+
+  document.getElementById('saleForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const saleStatusMsg = document.getElementById('saleStatusMsg');
+    const code = up(document.getElementById('saleBarcode').value);
+    const saleDate = document.getElementById('saleDate').value;
+    const jobNo = up(document.getElementById('saleJobNo').value);
+    const qty = parseInt(document.getElementById('saleQty').value || '0');
+
+    const item = allItems.find(x => x.item_code === code);
+    if (!item) { saleStatusMsg.textContent = '⚠️ No item found with this barcode.'; return; }
+    if (!qty || qty <= 0) { saleStatusMsg.textContent = '⚠️ Enter a valid quantity.'; return; }
+    if (qty > item.quantity) { saleStatusMsg.textContent = `⚠️ Only ${item.quantity} in stock — cannot sell ${qty}.`; return; }
+
+    // Deduct from box_breakdown, depleting boxes in order until qty is covered
+    const breakdown = getBoxBreakdown(item);
+    let remaining = qty;
+    for (const box of Object.keys(breakdown)) {
+      if (remaining <= 0) break;
+      const take = Math.min(breakdown[box], remaining);
+      breakdown[box] -= take;
+      remaining -= take;
+    }
+    Object.keys(breakdown).forEach(box => { if (breakdown[box] <= 0) delete breakdown[box]; });
+    const newQty = item.quantity - qty;
+    const newBox = Object.keys(breakdown).join(', ') || item.box;
+
+    const { error: updateError } = await sb.from('items')
+      .update({ quantity: newQty, box: newBox, box_breakdown: breakdown })
+      .eq('id', item.id);
+    if (updateError) { saleStatusMsg.textContent = 'Error updating stock: ' + updateError.message; return; }
+
+    const { error: saleError } = await sb.from('sales').insert([{
+      item_id: item.id, item_code: code, brand: item.brand, model: item.model,
+      sale_date: saleDate, job_no: jobNo, qty: qty
+    }]);
+    if (saleError) { saleStatusMsg.textContent = 'Sale recorded but log failed to save: ' + saleError.message; }
+    else { saleStatusMsg.textContent = `✅ Sale recorded. Remaining stock: ${newQty}.`; }
+
+    document.getElementById('saleForm').reset();
+    saleDateInput.value = new Date().toISOString().slice(0, 10);
+    document.getElementById('saleQty').value = 1;
+    document.getElementById('saleItemInfo').textContent = '';
+    loadItems();
+    loadSalesLog();
+  });
+
+  async function loadSalesLog() {
+    const body = document.getElementById('salesLogBody');
+    if (!body) return;
+    const { data, error } = await sb.from('sales').select('*').order('created_at', { ascending: false }).limit(50);
+    body.innerHTML = '';
+    if (error) { console.error('Error loading sales log', error); return; }
+    (data || []).forEach(s => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${s.sale_date}</td><td>${s.item_code}</td><td>${s.brand}</td><td>${s.model}</td><td>${s.job_no}</td><td>${s.qty}</td>`;
+      body.appendChild(tr);
+    });
+  }
+
+  // ---------- LIVE MATCHES ----------
+  const liveMatchesDiv = document.getElementById('liveMatches');
+  const liveMatchesBody = document.getElementById('liveMatchesBody');
+  const liveFieldMap = [
+    ['brand', 'brand'], ['itemType', 'item_type'], ['model', 'model'], ['size', 'size'],
+    ['rimColour', 'rim_colour'], ['sideColour', 'side_colour'], ['gender', 'gender'],
+    ['material', 'material'], ['rimType', 'rim_type'], ['shape', 'shape']
+  ];
+
+  function updateLiveMatches() {
+    const active = liveFieldMap
+      .map(([inputId, col]) => [col, document.getElementById(inputId).value.trim().toUpperCase()])
+      .filter(([, val]) => val.length > 0);
+
+    if (active.length === 0) { liveMatchesDiv.style.display = 'none'; return; }
+
+    const matches = allItems.filter(item =>
+      active.every(([col, val]) => (item[col] || '').toUpperCase().includes(val))
+    );
+
+    if (matches.length === 0) { liveMatchesDiv.style.display = 'none'; return; }
+
+    liveMatchesDiv.style.display = 'block';
+    liveMatchesBody.innerHTML = '';
+    matches.slice(0, 15).forEach((r) => {
+      const tr = document.createElement('tr');
+      const realSno = allItems.findIndex(x => x.id === r.id) + 1;
+      tr.innerHTML = `<td>${r.item_type || ''}</td><td>${realSno}</td><td>${r.brand}</td><td>${r.model}</td><td>${r.size}</td><td>${r.rim_colour}</td>
+        <td>${r.side_colour}</td><td>${r.gender}</td><td>${r.material}</td><td>${r.rim_type}</td>
+        <td>${r.shape}</td><td>${r.quantity}</td><td>${r.box}</td><td>${r.price || ''}</td>`;
+      liveMatchesBody.appendChild(tr);
+    });
+  }
+
+  let liveMatchesTimer = null;
+  function debouncedUpdateLiveMatches() {
+    clearTimeout(liveMatchesTimer);
+    liveMatchesTimer = setTimeout(updateLiveMatches, 200);
+  }
+
+  liveFieldMap.forEach(([inputId]) => {
+    document.getElementById(inputId).addEventListener('input', debouncedUpdateLiveMatches);
+  });
+
+  // ---------- AUTOFILL FROM LAST ENTERED (same brand + model) ----------
+  // When Brand + Model match a previously saved item exactly, autofill every
+  // other field (except Quantity) from that item's most recently entered record,
+  // so re-stocking the same brand/model doesn't mean retyping everything.
+  function autofillFromBrandModel() {
+    if (editingId) return; // don't clobber fields while editing an existing item
+
+    const brandVal = document.getElementById('brand').value.trim().toUpperCase();
+    const modelVal = document.getElementById('model').value.trim().toUpperCase();
+    if (!brandVal || !modelVal) return;
+
+    const matches = allItems.filter(r =>
+      (r.brand || '').trim().toUpperCase() === brandVal &&
+      (r.model || '').trim().toUpperCase() === modelVal
+    );
+    if (matches.length === 0) return;
+
+    // allItems is loaded oldest -> newest, so the last match is the most recently entered
+    const last = matches[matches.length - 1];
+
+    const itemTypeEl = document.getElementById('itemType');
+    if (last.item_type) itemTypeEl.value = last.item_type;
+    document.getElementById('size').value = last.size || '';
+    document.getElementById('rimColour').value = last.rim_colour || '';
+    document.getElementById('sideColour').value = last.side_colour || '';
+    if (last.gender) document.getElementById('gender').value = last.gender;
+    document.getElementById('material').value = last.material || '';
+    if (last.rim_type) document.getElementById('rimType').value = last.rim_type;
+    document.getElementById('shape').value = last.shape || '';
+    document.getElementById('box').value = last.box || 'BOX1';
+    document.getElementById('price').value = last.price || '';
+    // Quantity is intentionally left alone — that's the one field meant to change.
+
+    debouncedUpdateLiveMatches();
+  }
+
+  ['brand', 'model'].forEach(inputId => {
+    document.getElementById(inputId).addEventListener('change', autofillFromBrandModel);
+  });
+
+  // ---------- ADD / EDIT / DELETE ----------
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!configured) {
+      statusMsg.textContent = "⚠️ Supabase isn't configured yet — fill in SUPABASE_URL and SUPABASE_ANON_KEY in the code.";
+      return;
+    }
+    const f = fields();
+    const desc = buildDescription(f);
+
+    if (editingId) {
+      const boxBreakdown = { [f.box]: f.quantity };
+      const { error } = await sb.from('items').update({ ...f, description: desc, box_breakdown: boxBreakdown }).eq('id', editingId);
+      if (error) { statusMsg.textContent = 'Error saving changes: ' + error.message; return; }
+      statusMsg.textContent = '✅ Item updated.';
+      stopEdit();
+      loadItems();
+      return;
+    }
+
+    const { data: existing, error } = await sb.from('items').select('*').eq('description', desc);
+    if (error) { statusMsg.textContent = 'Error checking duplicates: ' + error.message; return; }
+
+    if (existing && existing.length > 0) {
+      const sameBoxMatch = existing.find(x => {
+        const boxes = x.box ? x.box.split(',').map(b => b.trim()) : [];
+        return boxes.includes(f.box);
+      });
+      if (sameBoxMatch) {
+        // Same item, same box — merge quantity into that row, no new row
+        const breakdown = getBoxBreakdown(sameBoxMatch);
+        breakdown[f.box] = (breakdown[f.box] || 0) + f.quantity;
+        const newQty = Object.values(breakdown).reduce((a, b) => a + b, 0);
+        const { error: updateError } = await sb.from('items').update({ quantity: newQty, box_breakdown: breakdown }).eq('id', sameBoxMatch.id);
+        if (updateError) { statusMsg.textContent = 'Error updating: ' + updateError.message; return; }
+        statusMsg.textContent = `✅ Already in ${f.box} — increased quantity from ${sameBoxMatch.quantity} to ${newQty}.`;
+        resetFormKeepBox();
+        liveMatchesDiv.style.display = 'none';
+        loadItems();
+      } else {
+        // Same item, but a different box — create a new separate row for this location
+        await saveNewItem(f, desc);
+        const otherLocations = existing.map(x => `${x.box} (${x.quantity} PCS)`).join(', ');
+        statusMsg.textContent = `✅ New entry added for ${f.box}. Also stocked in: ${otherLocations}.`;
+      }
+    } else {
+      await saveNewItem(f, desc);
+    }
+  });
+
+  // Returns { BOX1: qty, BOX2: qty, ... } for an item, building it from legacy
+  // data (a plain box/quantity pair) if box_breakdown hasn't been saved yet.
+  function getBoxBreakdown(item) {
+    if (item.box_breakdown && Object.keys(item.box_breakdown).length > 0) {
+      return { ...item.box_breakdown };
+    }
+    const boxes = item.box ? item.box.split(',').map(b => b.trim()).filter(Boolean) : [];
+    const breakdown = {};
+    if (boxes.length <= 1) {
+      breakdown[boxes[0] || 'UNASSIGNED'] = item.quantity;
+    } else {
+      // Legacy multi-box row with no saved split — exact distribution is unknown,
+      // so the full quantity is attributed to the first box until corrected manually.
+      boxes.forEach((b, i) => { breakdown[b] = i === 0 ? item.quantity : 0; });
+    }
+    return breakdown;
+  }
+
+  function formatBoxBreakdown(breakdown) {
+    return Object.entries(breakdown).map(([box, qty]) => `${box}: ${qty}`).join(', ');
+  }
+
+  function resetFormKeepBox() {
+    const currentBox = document.getElementById('box').value;
+    const currentType = document.getElementById('itemType').value;
+    form.reset();
+    document.getElementById('box').value = currentBox;
+    document.getElementById('itemType').value = currentType;
+    document.getElementById('quantity').value = 1;
+  }
+
+  async function generateItemCode(itemType) {
+    const now = new Date();
+    const yymm = String(now.getFullYear()).slice(-2) + String(now.getMonth() + 1).padStart(2, '0');
+    const typeCode = itemType === 'FRAME' ? '01' : '02'; // FRAME=01, SUNGLASS=02
+    const { count, error } = await sb.from('items').select('*', { count: 'exact', head: true }).eq('item_type', itemType);
+    const ordinal = (error ? 0 : (count || 0)) + 1;
+    const serial = String(ordinal).padStart(6, '0');
+    return yymm + typeCode + serial;
+  }
+
+  async function saveNewItem(f, desc) {
+    const itemCode = await generateItemCode(f.item_type);
+    const boxBreakdown = { [f.box]: f.quantity };
+    const { error } = await sb.from('items').insert([{ ...f, description: desc, item_code: itemCode, box_breakdown: boxBreakdown }]);
+    if (error) { statusMsg.textContent = 'Error saving: ' + error.message; return; }
+    statusMsg.textContent = '✅ Item added.';
+    resetFormKeepBox();
+    liveMatchesDiv.style.display = 'none';
+    loadItems();
+  }
+
+  updateQtyBtn.addEventListener('click', async () => {
+    if (!pendingDupRow || !pendingItem) return;
+    const newQty = pendingDupRow.quantity + pendingItem.quantity;
+    const { error } = await sb.from('items').update({ quantity: newQty }).eq('id', pendingDupRow.id);
+    if (error) { statusMsg.textContent = 'Error updating: ' + error.message; return; }
+    statusMsg.textContent = `✅ Updated existing item's quantity to ${newQty}.`;
+    resetFormKeepBox();
+    resetWarning();
+    loadItems();
+  });
+
+  forceAddBtn.addEventListener('click', async () => {
+    if (!pendingItem) return;
+    await saveNewItem(pendingItem, pendingItem.description);
+    resetWarning();
+  });
+
+  cancelBtn.addEventListener('click', resetWarning);
+
+  function startEdit(r) {
+    editingId = r.id;
+    document.getElementById('brand').value = r.brand;
+    document.getElementById('itemType').value = r.item_type || '';
+    document.getElementById('model').value = r.model;
+    document.getElementById('size').value = r.size;
+    document.getElementById('rimColour').value = r.rim_colour;
+    document.getElementById('sideColour').value = r.side_colour;
+    document.getElementById('gender').value = r.gender;
+    document.getElementById('material').value = r.material;
+    document.getElementById('rimType').value = r.rim_type;
+    document.getElementById('shape').value = r.shape;
+    document.getElementById('quantity').value = r.quantity;
+    document.getElementById('box').value = r.box;
+    document.getElementById('price').value = r.price || '';
+    submitBtn.textContent = 'Save Changes';
+    cancelEditBtn.style.display = 'inline-block';
+    resetWarning();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function stopEdit() {
+    editingId = null;
+    resetFormKeepBox();
+    submitBtn.textContent = 'Check & Add Item';
+    cancelEditBtn.style.display = 'none';
+    liveMatchesDiv.style.display = 'none';
+  }
+
+  cancelEditBtn.addEventListener('click', stopEdit);
+
+  async function deleteItem(r) {
+    if (!confirm(`DELETE ${r.brand} ${r.model} (SIZE ${r.size})? THIS CANNOT BE UNDONE.`)) return;
+    const { error } = await sb.from('items').delete().eq('id', r.id);
+    if (error) { statusMsg.textContent = 'Error deleting: ' + error.message; return; }
+    statusMsg.textContent = '🗑️ Item deleted.';
+    if (editingId === r.id) stopEdit();
+    loadItems();
+  }
+
+  // ---------- PRINT / EXPORT ----------
+  document.getElementById('printBtn').addEventListener('click', () => window.print());
+
+  function buildItemCode(r) {
+    // Fallback for older items saved before barcodes were stored permanently
+    const now = new Date();
+    const yymm = String(now.getFullYear()).slice(-2) + String(now.getMonth() + 1).padStart(2, '0');
+    const typeCode = r.item_type === 'FRAME' ? '01' : '02'; // FRAME=01, SUNGLASS=02
+    const sameType = allItems.filter(x => x.item_type === r.item_type);
+    const typeOrdinal = sameType.findIndex(x => x.id === r.id) + 1;
+    const serial = String(typeOrdinal).padStart(6, '0');
+    return yymm + typeCode + serial;
+  }
+
+  async function buildQrLabels(items) {
+    const container = document.getElementById('qrPrintArea');
+    container.innerHTML = '';
+    let successCount = 0;
+    const imgLoadPromises = [];
+    items.forEach(r => {
+      const itemCode = r.item_code || buildItemCode(r);
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&margin=1&data=${encodeURIComponent(itemCode)}`;
+      const barcodeUrl = `https://barcode.tec-it.com/barcode.ashx?data=${encodeURIComponent(itemCode)}&code=Code128&dpi=200&imagetype=Png`;
+      const div = document.createElement('div');
+      div.className = 'qr-label';
+      div.innerHTML = `
+        <img src="${qrUrl}" class="qr-img" alt="QR code">
+        <div class="qr-text">
+          <div class="qr-digits">${itemCode}</div>
+          <div class="qr-desc">${r.brand} ${r.model} ${r.rim_colour}</div>
+          <div class="qr-price">${r.price ? 'PRICE: ' + r.price : ''}</div>
+          <img src="${barcodeUrl}" class="barcode-img" alt="Barcode">
+        </div>
+      `;
+      container.appendChild(div);
+      const imgs = div.querySelectorAll('img');
+      let labelLoaded = 0;
+      imgs.forEach(img => {
+        imgLoadPromises.push(new Promise(resolve => {
+          img.onload = () => { labelLoaded++; if (labelLoaded === imgs.length) successCount++; resolve(); };
+          img.onerror = () => { console.error('Image failed to load for item', r.id); resolve(); };
+          // Failsafe in case neither event fires within a few seconds
+          setTimeout(resolve, 4000);
+        }));
+      });
+    });
+    await Promise.all(imgLoadPromises);
+    return successCount;
+  }
+
+  document.getElementById('qrPrintBtn').addEventListener('click', async () => {
+    const items = selectedIds.size > 0
+      ? allItems.filter(r => selectedIds.has(String(r.id)))
+      : allItems;
+    if (items.length === 0) {
+      statusMsg.textContent = 'No items to generate QR labels for.';
+      return;
+    }
+    statusMsg.textContent = 'Generating QR labels...';
+    const successCount = await buildQrLabels(items);
+    if (successCount === 0) {
+      statusMsg.textContent = '⚠️ QR images failed to load — check your internet connection.';
+      return;
+    }
+    statusMsg.textContent = successCount < items.length
+      ? `⚠️ Generated ${successCount} of ${items.length} labels — some failed to load.`
+      : '';
+    document.getElementById('qrPageOverride').textContent = '@page { size: 2in 1in; margin: 0; }';
+    document.body.classList.add('printing-qr');
+    window.print();
+  });
+
+  window.addEventListener('afterprint', () => {
+    document.body.classList.remove('printing-qr');
+    document.getElementById('qrPageOverride').textContent = '';
+  });
+
+  document.getElementById('exportBtn').addEventListener('click', () => {
+    const headers = ['Type','Sr#','Brand','Model','Size','RIM Colour','Side Colour','Gender','Material','Rim Type','Shape','Quantity','Box','Other Box','Price','Barcode'];
+    const lines = [headers.join(',')];
+    const exportItems = selectedIds.size > 0
+      ? allItems.filter(r => selectedIds.has(String(r.id)))
+      : allItems;
+    exportItems.forEach((r) => {
+      const sno = allItems.findIndex(x => x.id === r.id) + 1;
+      const otherBoxes = allItems.filter(x => x.description === r.description && x.id !== r.id)
+        .map(x => `${x.box} (SR#${allItems.findIndex(y => y.id === x.id) + 1})`)
+        .join(', ');
+      const row = [r.item_type || '', sno, r.brand, r.model, r.size, r.rim_colour, r.side_colour, r.gender, r.material, r.rim_type, r.shape, r.quantity, formatBoxBreakdown(getBoxBreakdown(r)), otherBoxes, r.price || '', r.item_code || ''];
+      lines.push(row.map(v => `"${String(v).replace(/"/g,'""')}"`).join(','));
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `eyewear-inventory-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+</script>
+
+</body>
+</html>
